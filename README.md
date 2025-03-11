@@ -1,4 +1,4 @@
-# sycl_help_api
+# sycl_runtime_api
 
 It is a library to help understand and develop sycl like cuda. Many concept in sycl will be re-deigned like what cuda does.
 
@@ -13,4 +13,9 @@ It is a library to help understand and develop sycl like cuda. Many concept in s
 | `gridDim.x/y/z` | `gridDim_x/y/z(it)` | `cube::gridDim.x/y/z` |
 
 > note: `it` means `sycl::nd_item<size_t>`
+
 > note: `cube index(it); index.threadIdx.x;`
+
+## inspire
+1. cuda runtime api
+2. intel-oneapi-dpcpp-ct
