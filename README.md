@@ -4,12 +4,13 @@ It is a library to help understand and develop sycl like cuda. Many concept in s
 
 ## map cuda build-in variable
 
-| cuda | sycl |
-| ---- | ---- |
-| `warpSize` | `subSize(it)` |
-| `threadIdx.x/y/z` | `threadIdx_x/y/z(it)` |
-| `blockDim.x/y/z` | `blockDim_x/y/z(it)` |
-| `blockIdx.x/y/z` | `blockIdx_x/y/z(it)` |
-| `gridDim.x/y/z` | `gridDim_x/y/z(it)` |
+| cuda | sycl | sycl |
+| ---- | ---- | ---- |
+| `warpSize` | `subSize(it)` | |
+| `threadIdx.x/y/z` | `threadIdx_x/y/z(it)` | `cube::threadIdx.x/y/z` |
+| `blockDim.x/y/z` | `blockDim_x/y/z(it)` | `cube::blockDim.x/y/z` |
+| `blockIdx.x/y/z` | `blockIdx_x/y/z(it)` | `cube::blockIdx.x/y/z` |
+| `gridDim.x/y/z` | `gridDim_x/y/z(it)` | `cube::gridDim.x/y/z` |
 
-> node: `it` means `sycl::nd_item<size_t>`
+> note: `it` means `sycl::nd_item<size_t>`
+> note: `cube index(it); index.threadIdx.x;`
