@@ -6,7 +6,7 @@
 #include "sycl_runtime_api.hpp"
 
 void vec_add_kernel(sycl::nd_item<3> item, float* a, float* b, float* c, size_t N) {
-    size_t idx = item.get_global_id(0); // 获取全局线程ID
+    size_t idx = item.get_global_id(2); // 获取全局线程ID
     if (idx < N) {                      // 边界检查
         c[idx] = a[idx] + b[idx];       // 向量加法
     }
@@ -53,14 +53,15 @@ int main() {
   
     //kernel
   try {
-    q.submit([&](sycl::handler& h) {
-      h.parallel_for<class vector_add_usm>(sycl::range<1>(data_size), [=](sycl::id<1> i) {
-        c[i] = a[i] + b[i];
-      });
-    }).wait(); // Wait for the kernel to complete.
-    // sycl::range<3> gws{1,1,1024};
-    // sycl::range<3> lws{1,1,256};
-    // sycl_kernel_launch(q, gws, lws, vec_add_kernel, a, b, c, data_size);
+    // q.submit([&](sycl::handler& h) {
+    //   h.parallel_for<class vector_add_usm>(sycl::range<1>(data_size), [=](sycl::id<1> i) {
+    //     c[i] = a[i] + b[i];
+    //   });
+    // }).wait(); // Wait for the kernel to complete.
+    sycl::range<3> gws{1,1,1024};
+    sycl::range<3> lws{1,1,256};
+    auto func = [=](sycl::nd_item<3> nit) { vec_add_kernel(nit, a, b, c, data_size);};
+    sycl_kernel_launch(q, gws, lws, func);
     
       // Verification
     bool passed = true;

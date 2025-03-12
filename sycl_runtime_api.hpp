@@ -43,26 +43,22 @@ struct cube {
         gridDim{it.get_group_range(2), it.get_group_range(1), it.get_group_range(0)} {}
 };
 
-/// kernel launcher
+/// 1. define kernel
 /// void vec_add(sycl::nd_item<3> it, float* c, float* a, float* b, int size) {
 ///   int i = it.get_global_id(2);
 ///   for (i < size) {
 ///     c[i] = a[i] + b[i];
 ///   }
 /// }
+/// 2. instance kernel
+/// auto func = [=](sycl::nd_item<3> nit) { vec_add(nit, c, a, b); };
+/// 3. launch kernel
+/// sycl_kernel_launch(q, gws, lws, func);
 
-/// template <typename KernelFunc, typename... Args>
-/// void sycl_kernel_launch(sycl::queue q,
-///                         sycl::range<3> gws,
-///                         sycl::range<3> lws,
-///                         KernelFunc ker,
-///                         Args... args) {
-///   q.submit([&](sycl::handler& cgh) {
-///     cgh.parallel_for(sycl::nd_range<3>(gws, lws), [=](sycl::nd_item<3> it){
-///       ker(it, args...);
-///     });
-///   }).wait();
-/// }
+template <typename KernelObject>
+void sycl_kernel_launch(sycl::queue& q, sycl::range<3> gws, sycl::range<3> lws, KernelObject ko) {
+    q.parallel_for(sycl::nd_range<3>(gws, lws), ko).wait();
+}
 
 /// device manager
 namespace detail {
