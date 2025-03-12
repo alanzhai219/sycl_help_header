@@ -1,7 +1,8 @@
 #include <sycl/sycl.hpp>
 
 #include <vector>
-#include <map>
+#include <unordered_map>
+#include <stack>
 #include <mutex>
 #include <exception>
 
@@ -28,11 +29,9 @@
 #define gridDim_y(it)       it.get_group_range(1)
 #define gridDim_z(it)       it.get_group_range(0)
 
-/*
-  cube idx(it);
-  idx.threadIdx.x;
-*/
-
+/// cube is a helpful wrapper mapping to cuda spec.
+/// cube idx(it);
+/// idx.threadIdx.x;
 struct cube {
   struct {
      size_t x, y, z;
@@ -43,6 +42,27 @@ struct cube {
         blockIdx{it.get_group(2), it.get_group(1), it.get_group(0)},
         gridDim{it.get_group_range(2), it.get_group_range(1), it.get_group_range(0)} {}
 };
+
+/// kernel launcher
+/// void vec_add(sycl::nd_item<3> it, float* c, float* a, float* b, int size) {
+///   int i = it.get_global_id(2);
+///   for (i < size) {
+///     c[i] = a[i] + b[i];
+///   }
+/// }
+
+/// template <typename KernelFunc, typename... Args>
+/// void sycl_kernel_launch(sycl::queue q,
+///                         sycl::range<3> gws,
+///                         sycl::range<3> lws,
+///                         KernelFunc ker,
+///                         Args... args) {
+///   q.submit([&](sycl::handler& cgh) {
+///     cgh.parallel_for(sycl::nd_range<3>(gws, lws), [=](sycl::nd_item<3> it){
+///       ker(it, args...);
+///     });
+///   }).wait();
+/// }
 
 /// device manager
 namespace detail {
@@ -63,7 +83,7 @@ public:
     // 析构函数
     ~dev_mgr() {
         std::lock_guard<std::mutex> lock(m_queue_mutex);
-        clear_queues();
+        destroy_queues();
     }
 
 public:
@@ -123,58 +143,52 @@ public:
             "] is filtered out in current device list!");
     }
 
-    // // late initialization
-    // void push_device(unsigned int id) {
-    //     std::lock_guard<std::recursive_mutex> lock(m_dev_mutex);
-    //     check_id(id);
-    //     m_dev_stack.push(id);
-    //     update_queues(); // 更新队列以匹配新设备
-    // }
+    // late initialization
+    void push_device(unsigned int id) {
+        std::lock_guard<std::recursive_mutex> lock(m_dev_mutex);
+        check_id(id);
+        m_dev_stack.push(id);
+        update_queues(); // 更新队列以匹配新设备
+    }
 
-    // // early clear
-    // unsigned int pop_device() {
-    //     std::lock_guard<std::recursive_mutex> lock(m_dev_mutex);
-    //     if (m_dev_stack.empty()) {
-    //         throw std::runtime_error("can't pop an empty dpct device stack");
-    //     }
-    //     auto id = m_dev_stack.top();
-    //     m_dev_stack.pop();
-    //     update_queues(); // 更新队列以匹配栈顶设备
-    //     return id;
-    // }
+    // early clear
+    unsigned int pop_device() {
+        std::lock_guard<std::recursive_mutex> lock(m_dev_mutex);
+        if (m_dev_stack.empty()) {
+            throw std::runtime_error("can't pop an empty dpct device stack");
+        }
+        auto id = m_dev_stack.top();
+        m_dev_stack.pop();
+        update_queues(); // 更新队列以匹配栈顶设备
+        return id;
+    }
 
     // queue manager
-		void reset() {
-				std::lock_guard<std::mutex> lock(m_queue_mutex);
-				clear_queues();
-				init_queues();
-		}
-
 		sycl::queue& in_order_queue() {
 				std::lock_guard<std::mutex> lock(m_queue_mutex);
         sycl::device& cur_dev = get_current_device();
-				if (!m_dq_map[cur_dev].q_in_order) {
+				if (!m_dq_map[cur_dev]->q_in_order) {
 						init_queues();
 				}
-				return *m_dq_map[cur_dev].q_in_order;
+				return *m_dq_map[cur_dev]->q_in_order;
 		}
 
 		sycl::queue& out_of_order_queue() {
 				std::lock_guard<std::mutex> lock(m_queue_mutex);
         sycl::device& cur_dev = get_current_device();
-				if (!m_dq_map[cur_dev].q_out_of_order) {
+				if (!m_dq_map[cur_dev]->q_out_of_order) {
 						init_queues();
 				}
-				return *m_dq_map[cur_dev].q_out_of_order;
+				return *m_dq_map[cur_dev]->q_out_of_order;
 		}
 
 		sycl::queue& default_queue() {
 				std::lock_guard<std::mutex> lock(m_queue_mutex);
         sycl::device& cur_dev = get_current_device();
-				if (!m_dp_map[cur_dev].q_default) {
+				if (!m_dq_map[cur_dev]->q_default) {
 						init_queues();
 				}
-				return *m_dq_map[cur_dev].q_default;
+				return *m_dq_map[cur_dev]->q_default;
 		}
 
 
@@ -183,8 +197,8 @@ private:
     dev_mgr() {
         // init device
         sycl::device default_device = sycl::device(sycl::default_selector_v);
-        m_dq_map[default_device] = queue_pool{};
-        m_dq_map[dev].ctx = sycl::context(default_device);
+        m_dq_map[default_device] = std::make_shared<device_queue>();
+        m_dq_map[default_device]->ctx = sycl::context(default_device);
         m_devs.push_back(std::make_shared<sycl::device>(default_device));
         m_ctx = sycl::context(default_device);
 
@@ -197,8 +211,8 @@ private:
                 continue;
             }
 
-            m_dq_map[dev] = queue_pool{};
-            m_dq_map[dev].ctx = sycl::context(dev);
+            m_dq_map[dev] = std::make_shared<device_queue>();
+            m_dq_map[dev]->ctx = sycl::context(dev);
 
             m_devs.push_back(std::make_shared<sycl::device>(dev));
             if (_cpu_device == -1 && dev.is_cpu()) {
@@ -212,7 +226,9 @@ private:
 
     unsigned int current_device_id() const {
         std::lock_guard<std::recursive_mutex> lock(m_dev_mutex);
-        return m_dev_stack.empty() ? DEFAULT_DEVICE_ID : m_dev_stack.top();
+        unsigned int id = m_dev_stack.empty() ? DEFAULT_DEVICE_ID : m_dev_stack.top();
+        std::cout << "[debug] id = " << id << "\n";
+        return id;
     }
 
     void check_id(unsigned int id) const {
@@ -225,16 +241,16 @@ private:
     // 队列管理
     void init_queues() {
         sycl::device& cur_dev = get_current_device();
-        m_dq_map[cur_dev].q_in_order = std::make_unique<sycl::queue>(m_dq_map[cur_dev].ctx, cur_dev, sycl::property::queue::in_order{});
-        m_dq_map[cur_dev].q_out_of_order = std::make_unique<sycl::queue>(m_dq_map[cur_dev].ctx, cur_dev);
-        m_dq_map[cur_dev].q_default = std::make_unique<sycl::queue>(m_dq_map[cur_dev].ctx, cur_dev);
+        m_dq_map[cur_dev]->q_in_order = std::make_unique<sycl::queue>(m_dq_map[cur_dev]->ctx, cur_dev, sycl::property::queue::in_order{});
+        m_dq_map[cur_dev]->q_out_of_order = std::make_unique<sycl::queue>(m_dq_map[cur_dev]->ctx, cur_dev);
+        m_dq_map[cur_dev]->q_default = std::make_unique<sycl::queue>(m_dq_map[cur_dev]->ctx, cur_dev);
     }
 
     void clear_queues() {
         sycl::device& cur_dev = get_current_device();
-        m_dq_map[cur_dev].q_in_order.reset();
-        m_dq_map[cur_dev].q_out_of_order.reset();
-        m_dq_map[cur_dev].q_default.reset();
+        m_dq_map[cur_dev]->q_in_order.reset();
+        m_dq_map[cur_dev]->q_out_of_order.reset();
+        m_dq_map[cur_dev]->q_default.reset();
     }
 
     void update_queues() {
@@ -243,15 +259,23 @@ private:
         init_queues();
     }
 
+    void destroy_queues() {
+      for (auto cur_dev :  m_devs) {
+        m_dq_map[*cur_dev]->q_in_order.reset();
+        m_dq_map[*cur_dev]->q_out_of_order.reset();
+        m_dq_map[*cur_dev]->q_default.reset();
+      }
+    }
+
 private:
-    struct queue_pool {
+    struct device_queue {
       std::unique_ptr<sycl::queue> q_in_order = nullptr;
       std::unique_ptr<sycl::queue> q_out_of_order = nullptr;
       std::unique_ptr<sycl::queue> q_default = nullptr;
       sycl::context ctx;
     };
     // 设备管理数据
-    std::map<sycl::device, queue_pool> m_dq_map;
+    std::unordered_map<sycl::device, std::shared_ptr<device_queue>> m_dq_map;
 
     std::vector<std::shared_ptr<sycl::device>> m_devs;
     static inline thread_local std::stack<unsigned int> m_dev_stack;
@@ -266,39 +290,39 @@ private:
 } // detail
 
 // device
-static void list_devices() {
+static void sycl_list_devices() {
   return detail::dev_mgr::instance().list_devices();
 }
 
-static void set_device(unsigned int id) {
+static void sycl_set_device(unsigned int id) {
   return detail::dev_mgr::instance().set_device(id);
 }
 
-static inline sycl::device& get_current_device() {
+static inline sycl::device& sycl_get_current_device() {
   return detail::dev_mgr::instance().get_current_device();
 }
 
-static inline sycl::device& get_cpu_device() {
+static inline sycl::device& sycl_get_cpu_device() {
   return detail::dev_mgr::instance().get_cpu_device();
 }
 
-static inline sycl::device& get_device(unsigned int id) {
+static inline sycl::device& sycl_get_device(unsigned int id) {
   return detail::dev_mgr::instance().get_device(id);
 }
 
-static inline unsigned int get_device_id(sycl::device& dev) {
+static inline unsigned int sycl_get_device_id(sycl::device& dev) {
   return detail::dev_mgr::instance().get_device_id(dev);
 }
 
 // queue
-static inline sycl::queue& get_in_order_queue() {
+static inline sycl::queue& sycl_get_in_order_queue() {
   return detail::dev_mgr::instance().in_order_queue();
 }
 
-static inline sycl::queue& get_out_of_order_queue() {
+static inline sycl::queue& sycl_get_out_of_order_queue() {
   return detail::dev_mgr::instance().out_of_order_queue();
 }
 
-static inline sycl::queue& get_default_quque() {
+static inline sycl::queue& sycl_get_default_quque() {
   return detail::dev_mgr::instance().default_queue();
 }
