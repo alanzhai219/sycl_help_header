@@ -61,7 +61,7 @@ int main() {
     sycl::range<3> gws{1,1,1024};
     sycl::range<3> lws{1,1,256};
     auto func = [=](sycl::nd_item<3> nit) { vec_add_kernel(nit, a, b, c, data_size);};
-    sycl_kernel_launch(q, gws, lws, func);
+    sycl_launch_kernel(q, gws, lws, func);
     
       // Verification
     bool passed = true;

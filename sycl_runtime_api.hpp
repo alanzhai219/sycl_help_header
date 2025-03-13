@@ -53,10 +53,10 @@ struct cube {
 /// 2. instance kernel
 /// auto func = [=](sycl::nd_item<3> nit) { vec_add(nit, c, a, b); };
 /// 3. launch kernel
-/// sycl_kernel_launch(q, gws, lws, func);
+/// sycl_launch_kernel(q, gws, lws, func);
 
 template <typename KernelObject>
-void sycl_kernel_launch(sycl::queue& q, sycl::range<3> gws, sycl::range<3> lws, KernelObject ko) {
+void sycl_launch_kernel(sycl::queue& q, sycl::range<3> gws, sycl::range<3> lws, KernelObject ko) {
     q.parallel_for(sycl::nd_range<3>(gws, lws), ko).wait();
 }
 
